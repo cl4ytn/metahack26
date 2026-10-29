@@ -179,6 +179,9 @@ class VerificationResult(GraphPilotModel):
     id: EntityId
     task_id: EntityId
     execution_id: EntityId
+    graph_revision: int | None = None
+    project_path: str | None = None
+    is_simulation: bool = False
     command: str = Field(min_length=1)
     outcome: VerificationOutcome
     exit_code: int | None = None  # None when no process result is available
@@ -227,6 +230,9 @@ class ArchitectureGraph(GraphPilotModel):
     """The complete persisted state of a GraphPilot project."""
 
     schema_version: Literal["1.0"] = SCHEMA_VERSION  # type: ignore[assignment]
+    revision: int = 1
+    approved_revision: int | None = None
+    is_fixture: bool = True
     project_name: ShortText
     requirement: str = ""  # the originating natural-language requirement
     status: GraphStatus = GraphStatus.DRAFT

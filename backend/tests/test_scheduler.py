@@ -116,7 +116,7 @@ def test_in_flight_dependency_is_not_verified(stub_validator, dep_status):
     assert plan.ready == ()
 
 
-@pytest.mark.parametrize("dep_status", [S.FAILED, S.BLOCKED])
+@pytest.mark.parametrize("dep_status", [S.FAILED])
 def test_failed_or_blocked_dependency_blocks(stub_validator, dep_status):
     g = make_graph([("a", dep_status, []), ("b", S.PENDING, ["a"])])
     assert build_schedule(g).blocked == ("b",)
@@ -149,7 +149,7 @@ def test_ready_task_with_unverified_dependency_is_demoted_to_waiting(stub_valida
 
 
 @pytest.mark.parametrize(
-    "st", [S.RUNNING, S.IMPLEMENTED, S.VERIFYING, S.VERIFIED, S.FAILED, S.BLOCKED]
+    "st", [S.RUNNING, S.IMPLEMENTED, S.VERIFYING, S.VERIFIED, S.FAILED]
 )
 def test_non_schedulable_statuses_are_not_classified(stub_validator, st):
     plan = build_schedule(make_graph([("a", st, [])]))
@@ -171,3 +171,7 @@ def test_mixed_graph(stub_validator):
     assert plan.ready == ("api", "docs")
     assert plan.waiting == ("ui",)
     assert plan.blocked == ("report",)
+
+def test_previously_blocked_task_recovers(stub_validator):
+    g = make_graph([("a", S.VERIFIED, []), ("b", S.BLOCKED, ["a"])])
+    assert build_schedule(g).ready == ("b",)

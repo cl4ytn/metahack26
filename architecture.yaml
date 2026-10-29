@@ -1,0 +1,105 @@
+schema_version: '1.0'
+project_name: Bookmarks Service
+requirement: Scale Bookmarks Service with LRU cache, rate limiting on Slug Generator,
+  and Postgres read replica...
+status: approved
+approved_at: '2026-10-29T21:01:27.220770Z'
+nodes:
+- id: ui-web
+  name: Bookmarks Web UI
+  type: ui
+  description: ''
+  files: []
+- id: svc-api
+  name: Bookmarks HTTP API
+  type: api
+  description: ''
+  files: []
+- id: svc-links
+  name: Link Service
+  type: service
+  description: ''
+  files: []
+- id: mod-slug
+  name: Slug Generator
+  type: module
+  description: ''
+  files: []
+- id: db-main
+  name: Bookmarks Database
+  type: database
+  description: ''
+  files: []
+edges:
+- id: edge-ui-calls-api
+  source: ui-web
+  target: svc-api
+  type: calls
+  description: ''
+- id: edge-api-depends-links
+  source: svc-api
+  target: svc-links
+  type: depends_on
+  description: ''
+- id: edge-links-depends-slug
+  source: svc-links
+  target: mod-slug
+  type: depends_on
+  description: ''
+- id: edge-links-depends-db
+  source: svc-links
+  target: db-main
+  type: depends_on
+  description: ''
+tasks:
+- id: task-db-schema
+  title: Create the bookmarks table and migration
+  description: ''
+  node_id: db-main
+  depends_on: []
+  acceptance_criteria: []
+  status: pending
+  execution_ids: []
+  verification_ids: []
+- id: task-slug
+  title: Implement slug generation
+  description: ''
+  node_id: mod-slug
+  depends_on: []
+  acceptance_criteria: []
+  status: pending
+  execution_ids: []
+  verification_ids: []
+- id: task-link-service
+  title: Implement the link service
+  description: ''
+  node_id: svc-links
+  depends_on:
+  - task-db-schema
+  - task-slug
+  acceptance_criteria: []
+  status: pending
+  execution_ids: []
+  verification_ids: []
+- id: task-api
+  title: Expose the bookmarks HTTP endpoints
+  description: ''
+  node_id: svc-api
+  depends_on:
+  - task-link-service
+  acceptance_criteria: []
+  status: pending
+  execution_ids: []
+  verification_ids: []
+- id: task-web-ui
+  title: Build the bookmarks web UI
+  description: ''
+  node_id: ui-web
+  depends_on:
+  - task-api
+  acceptance_criteria: []
+  status: pending
+  execution_ids: []
+  verification_ids: []
+executions: []
+verifications: []

@@ -13,9 +13,9 @@ from backend.app.models.graph import ArchitectureGraph, GraphStatus, TaskStatus
 from backend.app.services.validator import ValidationReport, validate_graph
 
 # Tasks the scheduler classifies. All other statuses are left alone.
-_SCHEDULABLE = frozenset({TaskStatus.PENDING, TaskStatus.READY})
+_SCHEDULABLE = frozenset({TaskStatus.PENDING, TaskStatus.READY, TaskStatus.BLOCKED})
 # Dependency statuses that block their dependants.
-_BLOCKING = frozenset({TaskStatus.FAILED, TaskStatus.BLOCKED})
+_BLOCKING = frozenset({TaskStatus.FAILED})
 
 
 class SchedulerError(Exception):
@@ -92,3 +92,11 @@ def build_schedule(graph: ArchitectureGraph) -> SchedulePlan:
         blocked=tuple(blocked_ordered),
         waiting=tuple(waiting),
     )
+
+def reconcile_schedule(graph: ArchitectureGraph) -> ArchitectureGraph:
+    """Apply canonical scheduling including blocked-task recovery."""
+    if graph.status != GraphStatus.APPROVED:
+        return graph.model_copy(update={"tasks": [t.model_copy(update={"status": TaskStatus.PENDING}) for t in graph.tasks]})
+    plan = build_schedule(graph)
+    states = {**dict.fromkeys(plan.ready, TaskStatus.READY), **dict.fromkeys(plan.blocked, TaskStatus.BLOCKED), **dict.fromkeys(plan.waiting, TaskStatus.PENDING)}
+    return graph.model_copy(update={"tasks": [t.model_copy(update={"status": states[t.id]}) if t.id in states else t for t in graph.tasks]})
