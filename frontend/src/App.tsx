@@ -104,7 +104,16 @@ export function App() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [tab, setTab] = useState('graph')
+  const [tab, setTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const t = params.get('tab')
+      if (t && ['graph', 'tasks', 'evidence', 'yaml'].includes(t)) {
+        return t
+      }
+    }
+    return 'graph'
+  })
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<string | null>('task-db-schema')
   const [board, setBoard] = useState(false)
