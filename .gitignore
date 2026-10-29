@@ -1,0 +1,114 @@
+# ---- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments / conda (project-local only)
+.venv/
+venv/
+env/
+ENV/
+.conda/
+conda-meta/
+
+# ---- Testing & coverage ---------------------------------------------------
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# ---- Type checking / linting caches --------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+.pyre/
+
+# ---- Environment / secrets ------------------------------------------------
+# Track .env.example; ignore real secrets.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Node / React ---------------------------------------------------------
+node_modules/
+bower_components/
+jspm_packages/
+.pnp/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# React / Vite / CRA build output
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.cache/
+*.tsbuildinfo
+
+# Node tooling caches & logs
+.npm/
+.eslintcache
+.stylelintcache
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Frontend test/coverage output
+frontend/coverage/
+
+# ---- IDE / editor ---------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# ---- OS -------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- Project-local scratch ------------------------------------------------
+# Keep backend/architecture.yaml tracked — it is a deliverable.
+*.tmp
+*.bak
+scratch/
