@@ -1,13 +1,14 @@
-"""HTTP endpoints for architecture generation and retrieval."""
+"""HTTP endpoints for architecture generation, retrieval, and approval."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from backend.app.models.graph import ArchitectureGraph
+from backend.app.models.graph import ArchitectureGraph, GraphStatus
 from backend.app.services.muse_spark import (
     FixtureMuseSpark,
     MuseSparkAdapter,
@@ -18,7 +19,9 @@ from backend.app.services.validator import ValidationReport, validate_graph
 from backend.app.storage.yaml_store import (
     GraphFileNotFoundError,
     GraphStoreError,
+    InvalidGraphError,
     load_graph,
+    save_graph,
 )
 
 DEFAULT_ARCHITECTURE_PATH = Path(__file__).resolve().parents[2] / "architecture.yaml"
@@ -63,6 +66,13 @@ class ArchitectureGenerationResponse(BaseModel):
     graph: ArchitectureGraph
     validation: ValidationReportPayload
     adapter: AdapterMetadata
+
+
+class ArchitectureApproveResponse(BaseModel):
+    graph: ArchitectureGraph
+    validation: ValidationReportPayload
+    saved: bool
+    saved_path: str
 
 
 def get_muse_spark() -> MuseSparkAdapter:
@@ -120,3 +130,36 @@ def get_architecture(path: Path = Depends(get_architecture_path)) -> Architectur
         raise HTTPException(status_code=404, detail="No stored architecture") from exc
     except GraphStoreError as exc:
         raise HTTPException(status_code=500, detail="Stored architecture is unreadable") from exc
+
+
+@router.post("/approve", response_model=ArchitectureApproveResponse)
+def approve_architecture(
+    graph: ArchitectureGraph,
+    path: Path = Depends(get_architecture_path),
+) -> ArchitectureApproveResponse:
+    report = validate_graph(graph)
+    if not report.is_valid:
+        raise HTTPException(status_code=422, detail=report.messages())
+
+    graph.status = GraphStatus.APPROVED
+    graph.approved_at = datetime.now(timezone.utc)
+
+    try:
+        save_graph(graph, path)
+    except InvalidGraphError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Architecture could not be saved: {exc}",
+        ) from exc
+    except GraphStoreError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Architecture could not be persisted",
+        ) from exc
+
+    return ArchitectureApproveResponse(
+        graph=graph,
+        validation=_validation_payload(report),
+        saved=True,
+        saved_path=str(path),
+    )
