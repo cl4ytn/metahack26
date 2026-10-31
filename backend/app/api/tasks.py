@@ -34,6 +34,7 @@ from backend.app.services.coding_agent import (
     FixtureCodingAgent,
     TaskContext,
 )
+from backend.app.services.context_builder import build_task_context
 from backend.app.services.scheduler import (
     GraphNotApprovedError,
     SchedulePlan,
@@ -226,13 +227,6 @@ def _summarise_tasks(
     return summaries
 
 
-def _build_context(graph: ArchitectureGraph, task_id: str, workdir: Path) -> TaskContext:
-    """Deep-copy the graph so the agent sees a read-only snapshot."""
-    graph_copy = graph.model_copy(deep=True)
-    task_copy = next(t for t in graph_copy.tasks if t.id == task_id)
-    return TaskContext(task=task_copy, graph=graph_copy, workdir=workdir)
-
-
 def _persist(graph: ArchitectureGraph, path: Path) -> str:
     """Validate + save. Raises HTTPException(409) on invalid graph."""
     try:
@@ -373,7 +367,7 @@ def execute_task(
     task.status = TaskStatus.RUNNING
     execution_id = f"exec-{uuid.uuid4().hex}"
     started_at = datetime.now(timezone.utc)
-    context = _build_context(graph, task_id, workdir)
+    context = build_task_context(graph, task_id, workdir)
 
     # 1. Agent (may raise; a claimed result is not evidence).
     try:
