@@ -118,6 +118,14 @@ def test_refine_unavailable_returns_503(client):
     assert response.status_code == 503, response.text
 
 
+def test_refine_rename_to_same_id_returns_502(client):
+    """Regression: `rename X to X` must be rejected as an output error (502),
+    not silently accepted as an empty-turn no-op."""
+    graph = _draft_graph()
+    response = _post_refine(client, "rename svc-api to svc-api", graph)
+    assert response.status_code == 502, response.text
+
+
 class _EchoAdapter:
     def __init__(self, graph):
         self._graph = graph
