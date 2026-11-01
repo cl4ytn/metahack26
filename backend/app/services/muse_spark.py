@@ -188,7 +188,13 @@ class FixtureMuseSpark:
         elif (m := _REMOVE_RE.match(text)):
             turn = _apply_remove(result, m.group(1))
         elif (m := _RENAME_RE.match(text)):
-            turn = _apply_rename(result, m.group(1), m.group(2))
+            old_id, new_id = m.group(1), m.group(2)
+            if old_id == new_id:
+                raise MuseSparkOutputError(
+                    f"fixture refine cannot rename {old_id!r} to itself; "
+                    "old and new ids must differ"
+                )
+            turn = _apply_rename(result, old_id, new_id)
         else:
             raise MuseSparkOutputError(
                 f"fixture refine does not understand instruction {text!r}; "
@@ -389,10 +395,6 @@ def _apply_rename(
             f"fixture refine: {new_id!r} is not a valid entity id "
             f"(must match ^[A-Za-z][A-Za-z0-9_-]{{0,63}}$)"
         )
-
-    if old_id == new_id:
-        # A rename to the same id is a no-op, recorded honestly as an empty turn.
-        return RefinementTurn(instruction=f"rename {old_id} to {new_id}")
 
     for i, n in enumerate(graph.nodes):
         if n.id == old_id:
