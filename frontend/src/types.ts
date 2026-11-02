@@ -1,34 +1,30 @@
 // frontend/src/types.ts
 //
 // Single source of truth for the frontend's view of GraphPilot backend JSON.
-// Rules enforced by this file:
-//   - Mirror confirmed Pydantic JSON projections only.
+//
+// Rules:
+//   - Mirror backend Pydantic JSON projections only.
 //   - No YAML parsing here or anywhere in the frontend.
 //   - No duplicated validation logic.
-//   - refinement_history is an AUDIT LOG of past instructions, not live entities.
-//     RefinementTurn IDs are historical; do not resolve them against current nodes/edges/tasks.
+//   - refinement_history is an AUDIT LOG, not live entities. Turn IDs are
+//     historical and are never resolved against current nodes/edges/tasks.
 //
-// Provenance markers:
-//   [C]  confirmed by the s21 backend record.
-//   [P]  PROVISIONAL — field presence/name pending a specific backend excerpt.
-//        Do not build UI against [P] members until they are confirmed.
+// Provenance:
+//   [C] confirmed by the s21/s23 master-prompt record.
+//   [S] sourced from a stated contract in the record, field names pending a
+//       backend excerpt. Transport is unaffected by any name mismatch; only
+//       this type needs correction.
+//   [O] structurally permissive so no unknown field name is invented.
 
-// ---------------------------------------------------------------------------
-// Identifiers and enums
-// ---------------------------------------------------------------------------
+export type EntityId = string; // [C] opaque; regex not re-implemented
 
-// [C] Backend applies an EntityId regex; the regex itself is not reproduced here
-// and must not be re-implemented in the frontend. Treat as opaque string.
-export type EntityId = string;
+export type SchemaVersion = "1.0" | "1.1"; // [C]
 
-// [C] schema_version is a 1.0 | 1.1 literal. 1.0 loads, preserves its version on
-// save, and is never auto-bumped. Refine rejects 1.0 with HTTP 422.
-export type SchemaVersion = "1.0" | "1.1";
-
-// [C] Lifecycle: pending -> ready -> running -> implemented -> verifying -> verified,
-// plus blocked and failed. "draft" is required because POST /api/architecture/refine
-// returns 409 when status is not DRAFT and generate_graph produces a draft graph.
-// [P] The exact literal spelling/set in graph.py GraphStatus is pending confirmation.
+// [C] Nine literals named in the master prompt:
+//   draft + lifecycle (pending, ready, running, implemented, verifying, verified)
+//   + terminal (blocked, failed).
+// Case-spelling is inferred; the record writes "DRAFT" in prose and
+// lowercase elsewhere. Confirm against graph.py before shipping.
 export type GraphStatus =
   | "draft"
   | "pending"
@@ -40,12 +36,7 @@ export type GraphStatus =
   | "blocked"
   | "failed";
 
-// ---------------------------------------------------------------------------
-// Refinement audit log
-// ---------------------------------------------------------------------------
-
-// [C] RefinementTurn: instruction + six list[EntityId] fields.
-// No timestamp, no snapshot. Appended last. Invisible to the validator.
+// [C] instruction + six EntityId arrays. No timestamp, no snapshot.
 export interface RefinementTurn {
   instruction: string;
   node_ids_added: EntityId[];
@@ -56,16 +47,9 @@ export interface RefinementTurn {
   task_ids_removed: EntityId[];
 }
 
-// ---------------------------------------------------------------------------
-// Graph entities
-// ---------------------------------------------------------------------------
-
-// [P] Full field declarations for GraphNode / GraphEdge / GraphTask are pending a
-// graph.py model excerpt. Fields listed below are only those confirmed through the
-// _compact_graph wire projection (s21 record). That projection may be a strict
-// SUBSET of the on-disk / API model, so these types are intentionally minimal and
-// must not be extended by inference. Any field added here requires confirmation.
-
+// [C-constrained] Only fields confirmed in the _compact_graph wire projection.
+// The on-disk Pydantic models may carry more fields (status, evidence,
+// verification command, etc.); do not extend by inference.
 export interface GraphNode {
   id: EntityId;
   name: string;
@@ -87,16 +71,7 @@ export interface GraphTask {
   depends_on: EntityId[];
 }
 
-// [C] ArchitectureGraph is the canonical contract surfaced to the browser inside
-// ArchitectureGenerationResponse / ArchitectureApproveResponse. It is NEVER YAML
-// in the browser.
-//
-// Note: a legacy on-disk 1.0 file may not contain refinement_history, but Pydantic
-// fills the default and model_dump(mode="json") emits it, so the JSON projection
-// the frontend receives always includes it.
-//
-// approved_at is a datetime serialized by Pydantic mode="json"; in JSON it is an
-// ISO-8601 string when present, or null.
+// [C] The browser never sees YAML; this is the JSON projection.
 export interface ArchitectureGraph {
   schema_version: SchemaVersion;
   project_name: string;
@@ -105,57 +80,47 @@ export interface ArchitectureGraph {
   edges: GraphEdge[];
   tasks: GraphTask[];
   refinement_history: RefinementTurn[];
-  approved_at: string | null;
+  approved_at: string | null; // Pydantic mode="json" ISO-8601 or null
 }
 
-// ---------------------------------------------------------------------------
-// Validation payloads
-// ---------------------------------------------------------------------------
-
-// [P] ValidationIssuePayload field declarations pending a validator.py excerpt.
-// Deliberately opaque so no field name is invented.
+// [C-constrained] is_valid confirmed ("validates but does not gate on is_valid").
+// The collection field name (issues/errors/…) is not in the record; the index
+// signature preserves access without inventing a name.
 export type ValidationIssuePayload = unknown;
 
-// [C] The report exposes is_valid; refine/generation validate but do not gate on it.
-// [P] The collection field name (e.g. issues vs errors) and any other members are
-// pending confirmation.
 export interface ValidationReportPayload {
   is_valid: boolean;
-  issues: ValidationIssuePayload[];
+  [key: string]: unknown;
 }
 
-// ---------------------------------------------------------------------------
-// Adapter metadata
-// ---------------------------------------------------------------------------
-
-// [C] Every adapter-bearing response echoes this. is_fixture must be surfaced on
-// every call — fixture path is labeled ("fixture", "replayed", "no model call").
+// [C] Echoed by every adapter-bearing response.
 export interface AdapterMetadata {
   name: string;
   is_fixture: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// API request/response shapes
-// ---------------------------------------------------------------------------
-
-// [C] POST /api/architecture/generate and POST /api/architecture/refine return this
-// shape. Validates but does not gate on is_valid; does not persist.
+// [C]
 export interface ArchitectureGenerationResponse {
   graph: ArchitectureGraph;
   validation: ValidationReportPayload;
   adapter: AdapterMetadata;
 }
 
-// [P] Request body field names for POST /api/architecture/refine are pending an
-// api/architecture.py excerpt. refine_graph(current, instruction) is the adapter
-// contract, so graph + instruction is the expected pairing, but names are unconfirmed.
+// [S] Payload contents confirmed by refine_graph(current, instruction);
+// JSON key names pending api/architecture.py excerpt.
 export interface ArchitectureRefineRequest {
   graph: ArchitectureGraph;
   instruction: string;
 }
 
-// [P] ArchitectureApproveResponse shape is pending an api/architecture.py excerpt.
-// Intentionally not guessed: typed as unknown so components cannot be written
-// against an unconfirmed shape without a compile-time prompt to confirm.
-export type ArchitectureApproveResponse = unknown;
+// [S] Approve persists a graph; body may carry additional fields.
+export interface ArchitectureApproveRequest {
+  graph: ArchitectureGraph;
+  [key: string]: unknown;
+}
+
+// [S] "graph JSON inside ArchitectureApproveResponse"; other fields open.
+export type ArchitectureApproveResponse = {
+  graph: ArchitectureGraph;
+  [key: string]: unknown;
+};
