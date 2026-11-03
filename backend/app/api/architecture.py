@@ -13,6 +13,7 @@ from backend.app.services.muse_spark import (
     FixtureMuseSpark,
     MuseSparkAdapter,
     MuseSparkError,
+    MuseSparkOutputError,
     MuseSparkUnavailableError,
 )
 from backend.app.services.validator import ValidationReport, validate_graph
@@ -40,6 +41,21 @@ class ArchitectureRequest(BaseModel):
     def _reject_blank_requirement(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("requirement must not be blank")
+        return value
+
+
+class ArchitectureRefineRequest(BaseModel):
+    instruction: str = Field(
+        min_length=1,
+        description="Natural-language refinement instruction applied to the current graph.",
+    )
+    current_graph: ArchitectureGraph
+
+    @field_validator("instruction")
+    @classmethod
+    def _reject_blank_instruction(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("instruction must not be blank")
         return value
 
 
@@ -113,6 +129,52 @@ def generate_architecture(
         raise HTTPException(status_code=503, detail="Muse Spark is unavailable") from exc
     except MuseSparkError as exc:
         raise HTTPException(status_code=502, detail="Muse Spark failed to produce a graph") from exc
+
+    report = validate_graph(graph)
+    return ArchitectureGenerationResponse(
+        graph=graph,
+        validation=_validation_payload(report),
+        adapter=AdapterMetadata(name=adapter.name(), is_fixture=adapter.is_fixture()),
+    )
+
+
+@router.post("/refine", response_model=ArchitectureGenerationResponse)
+def refine_architecture(
+    request: ArchitectureRefineRequest,
+    adapter: MuseSparkAdapter = Depends(get_muse_spark),
+) -> ArchitectureGenerationResponse:
+    current = request.current_graph
+
+    if current.schema_version != "1.1":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Refinement requires schema_version 1.1; "
+                "regenerate via POST /api/architecture"
+            ),
+        )
+    if current.status != GraphStatus.DRAFT:
+        raise HTTPException(
+            status_code=409,
+            detail="Only draft architectures can be refined",
+        )
+
+    try:
+        graph = adapter.refine_graph(current, request.instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except MuseSparkUnavailableError as exc:
+        raise HTTPException(status_code=503, detail="Muse Spark is unavailable") from exc
+    except MuseSparkOutputError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Muse Spark could not apply the refinement",
+        ) from exc
+    except MuseSparkError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected Muse Spark failure",
+        ) from exc
 
     report = validate_graph(graph)
     return ArchitectureGenerationResponse(

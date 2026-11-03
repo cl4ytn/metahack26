@@ -17,6 +17,19 @@ Conventions
   before this task may run.
 * Datetimes are timezone-aware UTC. Use ``model_dump(mode="json")`` when
   serialising so they become ISO-8601 strings that YAML can store safely.
+* ``refinement_history`` is an append-only audit log of refine turns, not a
+  set of live references. The validator deliberately does NOT chase IDs in
+  it: a node removed in turn 2 is allowed to appear in turn 1's
+  ``node_ids_added``, and a renamed ID appears once as removed and once as
+  added (rename is expressed as a remove+add pair, not a dedicated field).
+
+Schema version
+--------------
+``SCHEMA_VERSION = "1.1"`` adds ``refinement_history``. Files with
+``schema_version == "1.0"`` still load, still parse, and remain 1.0 on save:
+the version is never silently bumped. Refinement itself (the adapter's
+``refine_graph`` and ``POST /api/architecture/refine``) requires 1.1; a 1.0
+graph must be regenerated first.
 """
 
 from datetime import datetime, timezone
@@ -31,7 +44,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 # ---------------------------------------------------------------------------
 # Shared field types
@@ -219,6 +232,30 @@ class Task(GraphPilotModel):
 
 
 # ---------------------------------------------------------------------------
+# Refinement history
+# ---------------------------------------------------------------------------
+
+
+class RefinementTurn(GraphPilotModel):
+    """One refine step, logged in ``ArchitectureGraph.refinement_history``.
+
+    This is an audit trail, not a live reference set. A node that was removed
+    in turn 2 may legitimately appear in ``node_ids_added`` of turn 1; the
+    validator does not chase these IDs. Turn order is list order — no
+    timestamp, no snapshot. A rename is expressed as one removal and one
+    addition within the same turn.
+    """
+
+    instruction: str
+    node_ids_added: list[EntityId] = Field(default_factory=list)
+    node_ids_removed: list[EntityId] = Field(default_factory=list)
+    edge_ids_added: list[EntityId] = Field(default_factory=list)
+    edge_ids_removed: list[EntityId] = Field(default_factory=list)
+    task_ids_added: list[EntityId] = Field(default_factory=list)
+    task_ids_removed: list[EntityId] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Top-level graph
 # ---------------------------------------------------------------------------
 
@@ -226,7 +263,7 @@ class Task(GraphPilotModel):
 class ArchitectureGraph(GraphPilotModel):
     """The complete persisted state of a GraphPilot project."""
 
-    schema_version: Literal["1.0"] = SCHEMA_VERSION  # type: ignore[assignment]
+    schema_version: Literal["1.0", "1.1"] = SCHEMA_VERSION  # type: ignore[assignment]
     project_name: ShortText
     requirement: str = ""  # the originating natural-language requirement
     status: GraphStatus = GraphStatus.DRAFT
@@ -236,3 +273,4 @@ class ArchitectureGraph(GraphPilotModel):
     tasks: list[Task] = Field(default_factory=list)
     executions: list[ExecutionResult] = Field(default_factory=list)
     verifications: list[VerificationResult] = Field(default_factory=list)
+    refinement_history: list[RefinementTurn] = Field(default_factory=list)
