@@ -1,26 +1,30 @@
 // frontend/src/App.tsx
 //
-// GraphPilot VS Code-style IDE shell.
+// GraphPilot VS Code-style IDE shell, with an idea composer shown before the
+// first graph exists.
 //
-// Layout: 3 columns (explorer | editor | muse) over a top toolbar and a
-// bottom status strip. Every panel owns its own visuals; App owns the state
-// that ties them together:
+// Flow:
+//   empty -> composer (center pane) -> Generate(requirement) -> graph view
+//   graph -> Refine (MusePanel) -> Approve (MusePanel) -> implementation
+//   graph -> Regenerate (TopBar, reuses lastIdea) -> new draft, phase = design
+//   any   -> Reset (TopBar) -> back to composer, sessionKey bumped
 //
-//   response / adapter   — last generate or refine result
-//   approveResponse      — set once approve succeeds; drives phase
-//   view                 — which entity/root is shown in EditorArea
-//   busy / error         — request lifecycle + human-readable message
-//   sessionKey           — re-mounts EditorArea + MusePanel on generate/reset
-//                          so their local tab list / input reset cleanly
-//                          without affecting refine (which keeps sessionKey)
+// Idea lifecycle:
+//   `idea`     — the text currently in the composer.
+//   `lastIdea` — the requirement that produced the current graph. Regenerate
+//                reuses it so the graph is reproducible; to change the idea,
+//                Reset first.
 //
 // MusePanel contract: onRefine / onApprove MUST reject on failure. Both
-// handlers below re-throw after setting error. The panel keeps the input on
-// reject so the user can retry. onGenerate has no such contract.
+// handlers below re-throw after setting `error`.
 //
-// [Deferred] ExplorerPhase / ExplorerView / BusyKind live in FileExplorer and
-// App locally (not types.ts). Promoting to types.ts is a six-file refactor,
-// not done here for scope discipline.
+// [Deferred, unchanged from s26] ExplorerPhase / ExplorerView / BusyKind live
+// in FileExplorer and App locally, not types.ts. Promotion is a multi-file
+// refactor, not done here.
+//
+// [Deferred, unchanged] BACKEND_URL duplicates client.ts's resolution. Export
+// resolveBackendUrl() from client.ts to remove the duplication — one line,
+// still pending.
 
 import { useCallback, useState } from "react";
 import type { CSSProperties } from "react";
@@ -48,10 +52,8 @@ import type {
 // Constants
 // ---------------------------------------------------------------------------
 
-// Mirrors client.ts's resolution so the StatusBar strip cannot lie about the
-// URL the client is calling. If these ever diverge, export a resolveBackendUrl()
-// from client.ts and consume it here — flagged, not done to avoid touching
-// client.ts this turn.
+// Mirrors client.ts's resolution so the StatusBar strip and network-error
+// message cannot drift from what the client actually calls.
 const BACKEND_URL = (() => {
   const raw = (import.meta as any)?.env?.VITE_API_BASE_URL as
     | string
@@ -60,6 +62,12 @@ const BACKEND_URL = (() => {
 })();
 
 type BusyKind = null | "generate" | "refine" | "approve";
+
+const IDEA_SUGGESTIONS: string[] = [
+  "A bookmark manager with tagging and full-text search",
+  "A REST API for a task queue with priorities and retries",
+  "A file-sync service with conflict resolution",
+];
 
 // ---------------------------------------------------------------------------
 // App
@@ -75,27 +83,47 @@ export default function App() {
   const [busy, setBusy] = useState<BusyKind>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState(0);
+  const [idea, setIdea] = useState("");
+  const [lastIdea, setLastIdea] = useState("");
 
   const phase: ExplorerPhase =
     approveResponse !== null ? "implementation" : "design";
   const graph = response?.graph ?? null;
 
-  const handleGenerate = useCallback(async (): Promise<void> => {
-    setBusy("generate");
-    setError(null);
-    try {
-      const r = await generateArchitecture();
-      setResponse(r);
-      setAdapter(r.adapter);
-      setApproveResponse(null);
-      setView({ kind: "graph" });
-      setSessionKey((k) => k + 1);
-    } catch (e) {
-      setError(describeError(e));
-    } finally {
-      setBusy(null);
+  const handleGenerate = useCallback(
+    async (requirement: string): Promise<void> => {
+      const trimmed = requirement.trim();
+      if (!trimmed) {
+        setError("Describe the system you want to build before generating.");
+        return;
+      }
+      setBusy("generate");
+      setError(null);
+      try {
+        const r = await generateArchitecture({ requirement: trimmed });
+        setResponse(r);
+        setAdapter(r.adapter);
+        setApproveResponse(null);
+        setView({ kind: "graph" });
+        setSessionKey((k) => k + 1);
+        setLastIdea(trimmed);
+        setIdea("");
+      } catch (e) {
+        setError(describeError(e));
+      } finally {
+        setBusy(null);
+      }
+    },
+    []
+  );
+
+  const handleRegenerate = useCallback((): void => {
+    if (!lastIdea) {
+      setError("No previous idea to regenerate. Reset to start fresh.");
+      return;
     }
-  }, []);
+    void handleGenerate(lastIdea);
+  }, [lastIdea, handleGenerate]);
 
   const handleReset = useCallback((): void => {
     setResponse(null);
@@ -105,6 +133,8 @@ export default function App() {
     setError(null);
     setBusy(null);
     setSessionKey((k) => k + 1);
+    setIdea("");
+    setLastIdea("");
   }, []);
 
   // MusePanel contract: reject on failure.
@@ -140,7 +170,7 @@ export default function App() {
     setBusy("approve");
     setError(null);
     try {
-      const r = await approveArchitecture({ graph: response.graph });
+      const r = await approveArchitecture(response.graph);
       setApproveResponse(r);
     } catch (e) {
       setError(describeError(e));
@@ -160,7 +190,7 @@ export default function App() {
         phase={phase}
         busy={busy}
         hasGraph={graph !== null}
-        onGenerate={handleGenerate}
+        onRegenerate={handleRegenerate}
         onReset={handleReset}
       />
 
@@ -174,16 +204,25 @@ export default function App() {
       </div>
 
       <div style={cellStyle(2, 2)}>
-        <EditorArea
-          key={sessionKey}
-          graph={graph}
-          view={view}
-          phase={phase}
-          // Safe fallback: EditorArea only reads isFixture when graph != null,
-          // which implies adapter != null (they are set together).
-          isFixture={adapter?.is_fixture ?? false}
-          onSelect={setView}
-        />
+        {graph ? (
+          <EditorArea
+            key={sessionKey}
+            graph={graph}
+            view={view}
+            phase={phase}
+            isFixture={adapter?.is_fixture ?? false}
+            onSelect={setView}
+          />
+        ) : (
+          <Composer
+            value={idea}
+            onChange={setIdea}
+            onSubmit={() => void handleGenerate(idea)}
+            busy={busy === "generate"}
+            disabled={busy !== null}
+            error={error}
+          />
+        )}
       </div>
 
       <div style={cellStyle(3, 2)}>
@@ -214,6 +253,102 @@ export default function App() {
 }
 
 // ---------------------------------------------------------------------------
+// Composer
+// ---------------------------------------------------------------------------
+
+function Composer({
+  value,
+  onChange,
+  onSubmit,
+  busy,
+  disabled,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  busy: boolean;
+  disabled: boolean;
+  error: string | null;
+}) {
+  const canSubmit = !disabled && !busy && value.trim().length > 0;
+
+  return (
+    <div style={composerWrapStyle}>
+      <div style={composerInnerStyle}>
+        <h1 style={composerTitleStyle}>Propose an idea</h1>
+        <p style={composerSubStyle}>
+          Describe the system you want to build. The Muse Spark adapter will
+          draft an initial ArchitectureGraph for review. Nothing is persisted
+          until you approve.
+        </p>
+
+        {error && (
+          <div style={composerErrorStyle} role="alert">
+            <div style={{ flex: 1 }}>{error}</div>
+            <button
+              type="button"
+              onClick={() => onChange(value)}
+              style={{ display: "none" }}
+              aria-hidden="true"
+            />
+          </div>
+        )}
+
+        <label htmlFor="gp-idea-input" style={visuallyHiddenStyle}>
+          Idea
+        </label>
+        <textarea
+          id="gp-idea-input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              if (canSubmit) onSubmit();
+            }
+          }}
+          placeholder="e.g. A bookmark manager with tagging and full-text search"
+          disabled={disabled}
+          style={composerTextareaStyle}
+          rows={5}
+          spellCheck={false}
+        />
+
+        <div style={composerChipsRowStyle}>
+          {IDEA_SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onChange(s)}
+              disabled={disabled}
+              style={composerChipStyle}
+              title={`Use "${s}"`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
+        <div style={composerFooterStyle}>
+          <span style={composerHintStyle}>
+            ⌘/Ctrl + Enter to generate · nothing is written until you approve
+          </span>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            style={canSubmit ? primaryBtnStyle : primaryBtnDisabledStyle}
+          >
+            {busy ? "Generating…" : "Generate architecture"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // TopBar
 // ---------------------------------------------------------------------------
 
@@ -223,7 +358,7 @@ function TopBar({
   phase,
   busy,
   hasGraph,
-  onGenerate,
+  onRegenerate,
   onReset,
 }: {
   projectName: string | null;
@@ -231,7 +366,7 @@ function TopBar({
   phase: ExplorerPhase;
   busy: BusyKind;
   hasGraph: boolean;
-  onGenerate: () => void | Promise<void>;
+  onRegenerate: () => void;
   onReset: () => void;
 }) {
   return (
@@ -246,29 +381,27 @@ function TopBar({
       <div style={topActionsStyle}>
         <span style={phasePillStyle(phase)}>{phase}</span>
         {hasGraph && (
-          <button
-            type="button"
-            onClick={onReset}
-            disabled={busy !== null}
-            style={
-              busy !== null ? secondaryBtnDisabledStyle : secondaryBtnStyle
-            }
-          >
-            Reset
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={busy !== null}
+              style={
+                busy !== null ? secondaryBtnDisabledStyle : secondaryBtnStyle
+              }
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={onRegenerate}
+              disabled={busy !== null}
+              style={busy !== null ? primaryBtnDisabledStyle : primaryBtnStyle}
+            >
+              {busy === "generate" ? "Generating…" : "Regenerate"}
+            </button>
+          </>
         )}
-        <button
-          type="button"
-          onClick={() => void onGenerate()}
-          disabled={busy !== null}
-          style={busy !== null ? primaryBtnDisabledStyle : primaryBtnStyle}
-        >
-          {busy === "generate"
-            ? "Generating…"
-            : hasGraph
-            ? "Regenerate"
-            : "Generate"}
-        </button>
       </div>
     </div>
   );
@@ -336,6 +469,114 @@ function cellStyle(
     flexDirection: "column",
   };
 }
+
+// --- Composer ---
+
+const composerWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  height: "100%",
+  minHeight: 0,
+  padding: 24,
+  background: "#1e1e1e",
+  overflow: "auto",
+};
+
+const composerInnerStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 640,
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+};
+
+const composerTitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 20,
+  fontWeight: 600,
+  color: "#e2e8f0",
+};
+
+const composerSubStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  lineHeight: 1.5,
+  color: "#9d9d9d",
+};
+
+const composerErrorStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 8,
+  padding: "8px 10px",
+  background: "#3a1d1d",
+  border: "1px solid #be1100",
+  borderRadius: 4,
+  color: "#f48771",
+  fontSize: 12,
+  lineHeight: 1.45,
+};
+
+const composerTextareaStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 110,
+  padding: "10px 12px",
+  borderRadius: 4,
+  border: "1px solid #3c3c3c",
+  background: "#252526",
+  color: "#e2e8f0",
+  fontSize: 13,
+  lineHeight: 1.5,
+  fontFamily: "inherit",
+  resize: "vertical",
+  outline: "none",
+  boxSizing: "border-box",
+};
+
+const composerChipsRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const composerChipStyle: CSSProperties = {
+  padding: "3px 8px",
+  fontSize: 11,
+  borderRadius: 10,
+  border: "1px solid #3c3c3c",
+  background: "#2d2d2d",
+  color: "#cccccc",
+  cursor: "pointer",
+};
+
+const composerFooterStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const composerHintStyle: CSSProperties = {
+  fontSize: 11,
+  color: "#6e6e6e",
+};
+
+const visuallyHiddenStyle: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0,
+};
+
+// --- TopBar ---
 
 const topBarStyle: CSSProperties = {
   gridColumn: "1 / -1",

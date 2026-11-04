@@ -106,6 +106,18 @@ export interface ArchitectureGenerationResponse {
   adapter: AdapterMetadata;
 }
 
+// [S] POST /api/architecture request body. The master prompt's
+// "NL requirement -> Muse Spark adapter" implies the idea is sent to the
+// backend. `requirement` is the closest match in the record; alternatives in
+// the same record (`idea`, `prompt`, `text`) would need a one-line rename here
+// and in client.ts. Marked [S] because api/architecture.py has not been
+// excerpted. The index signature tolerates additional fields without
+// pretending to know them.
+export interface ArchitectureGenerateRequest {
+  requirement: string;
+  [key: string]: unknown;
+}
+
 // [S] Payload contents confirmed by refine_graph(current, instruction);
 // JSON key names pending api/architecture.py excerpt.
 export interface ArchitectureRefineRequest {
@@ -114,13 +126,13 @@ export interface ArchitectureRefineRequest {
 }
 
 // [S] Approve persists a graph; body may carry additional fields.
-export interface ArchitectureApproveRequest {
-  graph: ArchitectureGraph;
-  [key: string]: unknown;
-}
+export type ArchitectureApproveRequest = ArchitectureGraph;
+
 
 // [S] "graph JSON inside ArchitectureApproveResponse"; other fields open.
-export type ArchitectureApproveResponse = {
+export interface ArchitectureApproveResponse {
   graph: ArchitectureGraph;
-  [key: string]: unknown;
-};
+  validation: ValidationReportPayload;
+  saved: boolean;
+  saved_path: string;
+}

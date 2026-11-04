@@ -19,6 +19,7 @@
 import type {
   ArchitectureApproveRequest,
   ArchitectureApproveResponse,
+  ArchitectureGenerateRequest,
   ArchitectureGenerationResponse,
   ArchitectureRefineRequest,
 } from "../types";
@@ -130,11 +131,20 @@ async function request<T>(
 // ---------------------------------------------------------------------------
 
 // POST /api/architecture — generate
-// [S] No request body assumed; the fixture generate_graph takes no input.
-// If the route requires a { requirement } body, add an argument; transport
-// (JSON body, status ladder) does not change.
-export function generateArchitecture(): Promise<ArchitectureGenerationResponse> {
-  return request<ArchitectureGenerationResponse>("POST", "/api/architecture");
+// [S] The idea is sent as { requirement: string } (see types.ts). If the
+// backend's Pydantic model uses a different field name (e.g. "idea" or
+// "prompt"), the first call returns 422 with the required field named in
+// `detail`. Correction is one line here and one line in types.ts.
+// Calling with no argument sends an empty POST — kept for backward
+// compatibility with any caller that predates idea-seeding.
+export function generateArchitecture(
+  req?: ArchitectureGenerateRequest
+): Promise<ArchitectureGenerationResponse> {
+  return request<ArchitectureGenerationResponse>(
+    "POST",
+    "/api/architecture",
+    req
+  );
 }
 
 // POST /api/architecture/refine — graph-level refinement
